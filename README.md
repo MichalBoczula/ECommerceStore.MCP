@@ -34,4 +34,10 @@ uv run --locked pytest
 uv build --wheel
 ```
 
-The HTTP tests discover and call MCP tools against a substitute for the BFF that follows the [Products contract pinned by BFF](https://github.com/MichalBoczula/ECommerceStoreBFF/blob/master/contracts/upstream/products.openapi.json). GitHub Actions also builds the Docker image and checks that its HTTP server starts.
+The HTTP tests discover and call MCP tools against a substitute for the BFF that follows the [Products contract pinned by BFF](https://github.com/MichalBoczula/ECommerceStoreBFF/blob/master/contracts/upstream/products.openapi.json). GitHub Actions builds the Docker image, checks that its HTTP server starts, and scans it with Trivy.
+
+## Publish the image
+
+Set the `DOCKER_USER` and `DOCKER_TOKEN` repository secrets to the Docker Hub username and an access token with push access. After verification, a push to `main` publishes the tested image to `docker.io/<username>/ecommerce-store-mcp` with the commit SHA and `latest` tags. A manual run on `main` publishes the commit SHA tag.
+
+Download the `image-reference` artifact and use its `imageReference` value to pin the image digest for deployment.
