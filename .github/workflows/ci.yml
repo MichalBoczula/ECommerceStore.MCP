@@ -31,8 +31,17 @@ jobs:
       - run: uv run --no-sync pytest
       - run: uv build --wheel
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
       - name: Build the MCP image
-        run: docker build -t ecommerce-store-mcp:ci .
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ecommerce-store-mcp:ci
+          labels: org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Verify container startup
         shell: bash
@@ -47,3 +56,67 @@ jobs:
             docker logs "$container"
             exit 1
           fi
+
+      - name: Scan the MCP image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ecommerce-store-mcp:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Record the scanned image identity
+        shell: bash
+        run: |
+          image_id="$(docker image inspect --format '{{.Id}}' ecommerce-store-mcp:ci)"
+          test -n "$image_id"
+          printf 'SCANNED_IMAGE_ID=%s\n' "$image_id" >> "$GITHUB_ENV"
+          printf 'Scanned image ID: %s\n' "$image_id" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to Docker Hub
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Tag and publish the scanned MCP image
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          DOCKER_USER: ${{ secrets.DOCKER_USER }}
+        run: |
+          set -euo pipefail
+          image="docker.io/${DOCKER_USER}/ecommerce-store-mcp"
+          sha_tag="${image}:${GITHUB_SHA}"
+          test "$SCANNED_IMAGE_ID" = "$(docker image inspect --format '{{.Id}}' ecommerce-store-mcp:ci)"
+
+          docker tag ecommerce-store-mcp:ci "$sha_tag"
+          test "$SCANNED_IMAGE_ID" = "$(docker image inspect --format '{{.Id}}' "$sha_tag")"
+          docker push "$sha_tag" | tee "$RUNNER_TEMP/mcp-push-sha.log"
+          sha_digest="$(awk '/digest: sha256:/ { digest=$3 } END { print digest }' "$RUNNER_TEMP/mcp-push-sha.log")"
+          [[ "$sha_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            latest_tag="${image}:latest"
+            docker tag ecommerce-store-mcp:ci "$latest_tag"
+            test "$SCANNED_IMAGE_ID" = "$(docker image inspect --format '{{.Id}}' "$latest_tag")"
+            docker push "$latest_tag" | tee "$RUNNER_TEMP/mcp-push-latest.log"
+            latest_digest="$(awk '/digest: sha256:/ { digest=$3 } END { print digest }' "$RUNNER_TEMP/mcp-push-latest.log")"
+            test "$sha_digest" = "$latest_digest"
+          fi
+
+          mkdir -p artifacts
+          jq -n --arg image "${image}@${sha_digest}" --arg commit "$GITHUB_SHA" \
+            '{application: "mcp", imageReference: $image, commitSha: $commit}' > artifacts/image-reference.json
+          printf 'Published %s from scanned image %s with digest %s.\n' \
+            "$sha_tag" "$SCANNED_IMAGE_ID" "$sha_digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the immutable image reference
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-reference
+          path: artifacts/image-reference.json
+          if-no-files-found: error
