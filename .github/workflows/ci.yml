@@ -42,7 +42,7 @@ jobs:
             --env ECOMMERCE_BFF_BASE_URL=http://127.0.0.1:1 ecommerce-store-mcp:ci)"
           trap 'docker rm --force "$container" >/dev/null' EXIT
           address="$(docker port "$container" 8080/tcp)"
-          if ! curl --fail --silent --show-error --retry 10 --retry-connrefused \
+          if ! curl --fail --silent --show-error --retry 10 --retry-all-errors \
             --retry-delay 1 --max-time 3 "http://$address/health/live"; then
             docker logs "$container"
             exit 1
