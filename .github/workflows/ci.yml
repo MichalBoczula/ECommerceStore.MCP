@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.18"
+      - run: uv python install
+      - run: uv sync --locked
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync pytest
+      - run: uv build --wheel
+
+      - name: Build the MCP image
+        run: docker build -t ecommerce-store-mcp:ci .
+
+      - name: Verify container startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="$(docker run --detach --publish 127.0.0.1::8080 \
+            --env ECOMMERCE_BFF_BASE_URL=http://127.0.0.1:1 ecommerce-store-mcp:ci)"
+          trap 'docker rm --force "$container" >/dev/null' EXIT
+          address="$(docker port "$container" 8080/tcp)"
+          if ! curl --fail --silent --show-error --retry 10 --retry-connrefused \
+            --retry-delay 1 --max-time 3 "http://$address/health/live"; then
+            docker logs "$container"
+            exit 1
+          fi
