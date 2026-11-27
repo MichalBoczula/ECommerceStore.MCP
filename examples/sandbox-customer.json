@@ -1,0 +1,12 @@
+{
+  "first_name": "Demo",
+  "last_name": "Customer",
+  "email": "demo.customer@example.test",
+  "phone": "+48500100200",
+  "billing_address": {
+    "postal_code": "00-001",
+    "city": "Warszawa",
+    "street": "Przykladowa",
+    "building_number": "1"
+  }
+}
