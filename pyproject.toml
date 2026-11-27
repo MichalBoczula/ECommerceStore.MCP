@@ -13,11 +13,13 @@ dependencies = [
     "mcp>=2.3,<3",
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.10,<3",
+    "pyjwt[crypto]>=2.13,<3",
     "starlette>=1,<2",
 ]
 
 [project.scripts]
 ecommerce-store-mcp = "ecommerce_store_mcp.server:main"
+ecommerce-store-checkout = "ecommerce_store_mcp.code_mode:main"
 
 [dependency-groups]
 dev = [
